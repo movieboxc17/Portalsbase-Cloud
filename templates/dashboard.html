@@ -1,32 +1,72 @@
 <!DOCTYPE html>
 <html>
-<head><title>Dashboard</title><link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}"></head>
+<head>
+  <title>Dashboard</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
 <body>
-<h2>Welcome, {{ username }}</h2>
-<a href="{{ url_for('logout') }}">Logout</a>
+  <header class="topbar">
+    <div class="brand">PortalsBase Cloud</div>
 
-<h3>Upload File</h3>
-<form method="post" enctype="multipart/form-data">
-  <input type="file" name="file" required>
-  <button type="submit">Upload</button>
-</form>
+    <div class="storage" role="group" aria-label="Storage usage">
+      <div class="storage-info">
+        <div class="storage-label">Storage</div>
+        <div class="storage-numbers">
+          <span id="storage-used" class="num">—</span>
+          <span class="num-sep">used •</span>
+          <span id="storage-free" class="num">—</span>
+          <span class="num-sep">free</span>
+          <span class="num-total">of <span id="storage-total">—</span></span>
+        </div>
+      </div>
 
-<h3>Your Files</h3>
-<ul>
-{% for file in files %}
-  <li>
-    {{ file }}
-    [<a href="{{ url_for('download', filename=file) }}">Download</a>]
-    [<a href="{{ url_for('delete', filename=file) }}">Delete</a>]
-  </li>
-{% endfor %}
-</ul>
+      <div class="storage-bar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+        <div id="storage-fill" class="fill" style="width:0%"></div>
+        <div id="storage-left" class="left-overlay" style="width:100%"></div>
+      </div>
 
-{% with messages = get_flashed_messages() %}
-  {% if messages %}
-    <ul>{% for msg in messages %}<li>{{ msg }}</li>{% endfor %}</ul>
-  {% endif %}
-{% endwith %}
+      <div id="storage-text" class="storage-text" aria-live="polite">—</div>
+    </div>
+  </header>
 
+  <main class="container">
+    <section class="user-info">
+      <h2>Welcome, {{ username }}</h2>
+      <a href="{{ url_for('logout') }}">Logout</a>
+      <!-- Link to file manager page (create a route named 'file_manager' or change to static path '/files') -->
+      <p><a href="{{ url_for('file_manager') }}">Open File Manager</a></p>
+    </section>
+
+    <section class="upload">
+      <h3>Upload File</h3>
+      <form method="post" enctype="multipart/form-data">
+        <input type="file" name="file" required>
+        <button type="submit">Upload</button>
+      </form>
+    </section>
+
+    <section class="files">
+      <h3>Your Files</h3>
+      <ul>
+      {% for file in files %}
+        <li>
+          {{ file }}
+          [<a href="{{ url_for('download', filename=file) }}">Download</a>]
+          [<a href="{{ url_for('delete', filename=file) }}">Delete</a>]
+        </li>
+      {% endfor %}
+      </ul>
+    </section>
+
+    {% with messages = get_flashed_messages() %}
+      {% if messages %}
+        <section class="messages">
+          <ul>{% for msg in messages %}<li>{{ msg }}</li>{% endfor %}</ul>
+        </section>
+      {% endif %}
+    {% endwith %}
+  </main>
+
+  <script src="{{ url_for('static', filename='storage.js') }}"></script>
 </body>
 </html>
