@@ -43,7 +43,7 @@ def get_directory_size(path):
                 pass
     return total
 
-# Backwards compatible small helper (non-recursive as before)
+# Backwards-compatible helper (non-recursive)
 def total_size(folder):
     folder_abs = os.path.abspath(folder)
     if not os.path.exists(folder_abs):
@@ -52,6 +52,20 @@ def total_size(folder):
         return sum(os.path.getsize(os.path.join(folder_abs, f)) for f in os.listdir(folder_abs))
     except OSError:
         return get_directory_size(folder_abs)
+
+def format_bytes(num):
+    """Human-readable file size."""
+    if num is None:
+        return "—"
+    num = float(num)
+    for unit in ['B','KB','MB','GB','TB','PB']:
+        if num < 1024.0:
+            # show 0 decimals for B, 2 decimals for others <10
+            if unit == 'B':
+                return f"{int(num)} {unit}"
+            return f"{num:.2f} {unit}" if num < 10 else f"{num:.0f} {unit}"
+        num /= 1024.0
+    return f"{num:.2f} PB"
 
 # --- Routes ---
 @app.route("/", methods=["GET"])
@@ -126,8 +140,58 @@ def dashboard():
         flash(f"Uploaded {filename}!")
         return redirect(url_for("dashboard"))
 
-    files = os.listdir(folder)
-    return render_template("dashboard.html", files=files, username=user)
+    # Build files list with sizes so the template can show size badges
+    files_info = []
+    try:
+        names = sorted(os.listdir(folder))
+    except OSError:
+        names = []
+    for name in names:
+        path = os.path.join(folder, name)
+        if os.path.isfile(path):
+            try:
+                sz = os.path.getsize(path)
+            except OSError:
+                sz = 0
+            files_info.append({
+                "name": name,
+                "size": sz,
+                "size_human": format_bytes(sz)
+            })
+        else:
+            # if directory, show as directory with size=0
+            files_info.append({
+                "name": name,
+                "size": 0,
+                "size_human": "-"
+            })
+
+    # compute storage usage for this user and expose both raw and formatted values
+    used_bytes = get_directory_size(folder)
+    total_bytes = MAX_STORAGE
+    free_bytes = max(0, total_bytes - used_bytes)
+    percent = round((used_bytes / total_bytes) * 100, 2) if total_bytes > 0 else 0
+
+    # cache-buster token for static assets (mtime)
+    static_css_path = os.path.join(app.static_folder or "static", "style.css")
+    try:
+        static_version = int(os.path.getmtime(static_css_path))
+    except OSError:
+        static_version = 0
+
+    return render_template(
+        "dashboard.html",
+        files=files_info,
+        username=user,
+        storage_used=used_bytes,
+        storage_free=free_bytes,
+        storage_total=total_bytes,
+        storage_percent=percent,
+        storage_used_human=format_bytes(used_bytes),
+        storage_free_human=format_bytes(free_bytes),
+        storage_total_human=format_bytes(total_bytes),
+        static_version=static_version
+    )
 
 @app.route("/download/<filename>")
 def download(filename):
@@ -145,15 +209,14 @@ def delete(filename):
         flash(f"Deleted {filename}")
     return redirect(url_for("dashboard"))
 
-# --- New: file manager page route (so url_for('file_manager') works) ---
+# --- File manager route ---
 @app.route("/files")
 def file_manager():
     if "username" not in session:
         return redirect(url_for("login"))
-    # This expects templates/file-manager.html to exist and static assets under /static/
     return render_template("file-manager.html")
 
-# --- New: Storage usage API used by the dashboard and file manager UI ---
+# --- Storage usage API used by the dashboard and file manager UI ---
 @app.route("/api/storage/usage")
 def storage_usage():
     if "username" not in session:
@@ -164,15 +227,24 @@ def storage_usage():
     total = MAX_STORAGE
     free = max(0, total - used)
     percent = round((used / total) * 100, 2) if total > 0 else 0
-    return jsonify({"total": total, "used": used, "free": free, "percent": percent})
+    return jsonify({
+        "total": total,
+        "used": used,
+        "free": free,
+        "percent": percent,
+        "total_human": format_bytes(total),
+        "used_human": format_bytes(used),
+        "free_human": format_bytes(free)
+    })
 
-# --- New: Minimal files API for the file manager frontend ---
+# --- Minimal files API for the file manager frontend ---
 def _resolve_safe(base, rel_path):
     # Normalize and ensure the target is inside base
     if rel_path is None:
         rel_path = ""
     target = os.path.abspath(os.path.normpath(os.path.join(base, rel_path)))
-    if not target.startswith(base):
+    base_abs = os.path.abspath(base)
+    if not target.startswith(base_abs):
         raise ValueError("Invalid path")
     return target
 
@@ -192,11 +264,22 @@ def api_files():
         for name in sorted(os.listdir(target), key=lambda s: s.lower()):
             full = os.path.join(target, name)
             if os.path.isdir(full):
-                entries.append({"name": name, "path": os.path.relpath(full, base).replace("\\", "/"), "type": "directory"})
+                entries.append({
+                    "name": name,
+                    "path": os.path.relpath(full, base).replace("\\", "/"),
+                    "type": "directory"
+                })
             else:
                 size = os.path.getsize(full)
                 mtype, _ = mimetypes.guess_type(full)
-                entries.append({"name": name, "path": os.path.relpath(full, base).replace("\\", "/"), "type": "file", "size": size, "mime": mtype or "application/octet-stream"})
+                entries.append({
+                    "name": name,
+                    "path": os.path.relpath(full, base).replace("\\", "/"),
+                    "type": "file",
+                    "size": size,
+                    "mime": mtype or "application/octet-stream",
+                    "size_human": format_bytes(size)
+                })
     except OSError:
         return jsonify({"error": "Could not read directory"}), 500
 
