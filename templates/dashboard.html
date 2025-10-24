@@ -12,20 +12,26 @@
       <div class="storage-info">
         <div class="storage-label">Storage</div>
         <div class="storage-numbers">
-          <span id="storage-used" class="num">—</span>
+          <span id="storage-used" class="num">{{ storage_used_human or '—' }}</span>
           <span class="num-sep">used •</span>
-          <span id="storage-free" class="num">—</span>
+          <span id="storage-free" class="num">{{ storage_free_human or '—' }}</span>
           <span class="num-sep">free</span>
-          <span class="num-total">of <span id="storage-total">—</span></span>
+          <span class="num-total">of <span id="storage-total">{{ storage_total_human or '—' }}</span></span>
         </div>
       </div>
 
-      <div class="storage-bar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
-        <div id="storage-fill" class="fill" style="width:0%"></div>
-        <div id="storage-left" class="left-overlay" style="width:100%"></div>
+      <div class="storage-bar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{ storage_percent|default(0) }}">
+        <div id="storage-fill" class="fill" style="width:{{ storage_percent|default(0) }}%"></div>
+        <div id="storage-left" class="left-overlay" style="width:{{ 100 - (storage_percent|default(0)) }}%"></div>
       </div>
 
-      <div id="storage-text" class="storage-text" aria-live="polite">—</div>
+      <div id="storage-text" class="storage-text" aria-live="polite">
+        {% if storage_percent is defined %}
+          {{ storage_percent }}% used
+        {% else %}
+          —
+        {% endif %}
+      </div>
     </div>
   </header>
 
@@ -59,12 +65,12 @@
           <li class="file-item">
             <div class="file-left">
               <span class="file-icon">📄</span>
-              <span class="file-name">{{ file }}</span>
+              <span class="file-name">{{ file.name }}</span>
             </div>
             <div class="file-right">
-              <span class="size-badge small">—</span>
-              <a class="btn btn-sm" href="{{ url_for('download', filename=file) }}">Download</a>
-              <a class="btn btn-sm btn-danger" href="{{ url_for('delete', filename=file) }}" onclick="return confirm('Delete {{ file }}?')">Delete</a>
+              <span class="size-badge small">{{ file.size_human }}</span>
+              <a class="btn btn-sm" href="{{ url_for('download', filename=file.name) }}">Download</a>
+              <a class="btn btn-sm btn-danger" href="{{ url_for('delete', filename=file.name) }}" onclick="return confirm('Delete {{ file.name }}?')">Delete</a>
             </div>
           </li>
         {% else %}
