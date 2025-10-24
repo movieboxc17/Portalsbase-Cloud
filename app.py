@@ -1,5 +1,5 @@
-from flask import Flask, render_template, request, redirect, url_for, session, send_from_directory, flash
-import os, json
+from flask import Flask, render_template, request, redirect, url_for, session, send_from_directory, flash, jsonify, send_file
+import os, json, mimetypes
 from werkzeug.security import generate_password_hash, check_password_hash
 from werkzeug.utils import secure_filename
 
@@ -26,10 +26,32 @@ def save_users(users):
 def user_folder(username):
     path = os.path.join(UPLOAD_FOLDER, username)
     os.makedirs(path, exist_ok=True)
-    return path
+    return os.path.abspath(path)
 
+def get_directory_size(path):
+    """Return the total size in bytes for files under path (recursive)."""
+    total = 0
+    if not os.path.exists(path):
+        return 0
+    for dirpath, dirnames, filenames in os.walk(path):
+        for fname in filenames:
+            try:
+                fp = os.path.join(dirpath, fname)
+                total += os.path.getsize(fp)
+            except OSError:
+                # ignore unreadable files
+                pass
+    return total
+
+# Backwards compatible small helper (non-recursive as before)
 def total_size(folder):
-    return sum(os.path.getsize(os.path.join(folder, f)) for f in os.listdir(folder)) if os.path.exists(folder) else 0
+    folder_abs = os.path.abspath(folder)
+    if not os.path.exists(folder_abs):
+        return 0
+    try:
+        return sum(os.path.getsize(os.path.join(folder_abs, f)) for f in os.listdir(folder_abs))
+    except OSError:
+        return get_directory_size(folder_abs)
 
 # --- Routes ---
 @app.route("/", methods=["GET"])
@@ -94,7 +116,7 @@ def dashboard():
         file_contents = file.read()
 
         # Check storage limit
-        if total_size(folder) + len(file_contents) > MAX_STORAGE:
+        if get_directory_size(folder) + len(file_contents) > MAX_STORAGE:
             flash("Storage limit exceeded (1GB max)!")
             return redirect(url_for("dashboard"))
 
@@ -122,6 +144,99 @@ def delete(filename):
         os.remove(path)
         flash(f"Deleted {filename}")
     return redirect(url_for("dashboard"))
+
+# --- New: file manager page route (so url_for('file_manager') works) ---
+@app.route("/files")
+def file_manager():
+    if "username" not in session:
+        return redirect(url_for("login"))
+    # This expects templates/file-manager.html to exist and static assets under /static/
+    return render_template("file-manager.html")
+
+# --- New: Storage usage API used by the dashboard and file manager UI ---
+@app.route("/api/storage/usage")
+def storage_usage():
+    if "username" not in session:
+        return jsonify({"error": "Unauthorized"}), 401
+    user = session["username"]
+    folder = user_folder(user)
+    used = get_directory_size(folder)
+    total = MAX_STORAGE
+    free = max(0, total - used)
+    percent = round((used / total) * 100, 2) if total > 0 else 0
+    return jsonify({"total": total, "used": used, "free": free, "percent": percent})
+
+# --- New: Minimal files API for the file manager frontend ---
+def _resolve_safe(base, rel_path):
+    # Normalize and ensure the target is inside base
+    if rel_path is None:
+        rel_path = ""
+    target = os.path.abspath(os.path.normpath(os.path.join(base, rel_path)))
+    if not target.startswith(base):
+        raise ValueError("Invalid path")
+    return target
+
+@app.route("/api/files")
+def api_files():
+    if "username" not in session:
+        return jsonify({"error": "Unauthorized"}), 401
+    rel = request.args.get("path", "")
+    base = user_folder(session["username"])
+    try:
+        target = _resolve_safe(base, rel)
+    except ValueError:
+        return jsonify({"error": "Invalid path"}), 400
+
+    entries = []
+    try:
+        for name in sorted(os.listdir(target), key=lambda s: s.lower()):
+            full = os.path.join(target, name)
+            if os.path.isdir(full):
+                entries.append({"name": name, "path": os.path.relpath(full, base).replace("\\", "/"), "type": "directory"})
+            else:
+                size = os.path.getsize(full)
+                mtype, _ = mimetypes.guess_type(full)
+                entries.append({"name": name, "path": os.path.relpath(full, base).replace("\\", "/"), "type": "file", "size": size, "mime": mtype or "application/octet-stream"})
+    except OSError:
+        return jsonify({"error": "Could not read directory"}), 500
+
+    return jsonify({"path": rel, "list": entries})
+
+@app.route("/api/files/preview")
+def api_files_preview():
+    if "username" not in session:
+        return jsonify({"error": "Unauthorized"}), 401
+    p = request.args.get("path")
+    if not p:
+        return jsonify({"error": "Missing path"}), 400
+    base = user_folder(session["username"])
+    try:
+        target = _resolve_safe(base, p)
+    except ValueError:
+        return jsonify({"error": "Invalid path"}), 400
+    if not os.path.isfile(target):
+        return jsonify({"error": "File not found"}), 404
+    # send inline for preview; Flask will set Content-Type based on filename
+    return send_file(target, as_attachment=False)
+
+@app.route("/api/files/download")
+def api_files_download():
+    if "username" not in session:
+        return jsonify({"error": "Unauthorized"}), 401
+    p = request.args.get("path")
+    if not p:
+        return jsonify({"error": "Missing path"}), 400
+    base = user_folder(session["username"])
+    try:
+        target = _resolve_safe(base, p)
+    except ValueError:
+        return jsonify({"error": "Invalid path"}), 400
+    if not os.path.isfile(target):
+        return jsonify({"error": "File not found"}), 404
+    # send as attachment for download
+    directory = os.path.dirname(target)
+    filename = os.path.basename(target)
+    return send_from_directory(directory, filename, as_attachment=True)
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=True)
