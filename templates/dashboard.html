@@ -2,7 +2,8 @@
 <html>
 <head>
   <title>Dashboard</title>
-  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <!-- Link to static CSS with cache-buster -->
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v={{ static_version }}">
 </head>
 <body>
   <header class="topbar">
@@ -33,7 +34,6 @@
     <section class="user-info">
       <h2>Welcome, {{ username }}</h2>
       <a href="{{ url_for('logout') }}">Logout</a>
-      <!-- Link to file manager page (create a route named 'file_manager' or change to static path '/files') -->
       <p><a href="{{ url_for('file_manager') }}">Open File Manager</a></p>
     </section>
 
@@ -67,6 +67,7 @@
     {% endwith %}
   </main>
 
-  <script src="{{ url_for('static', filename='storage.js') }}"></script>
+  <!-- Storage script with same cache-buster so JS is refreshed too -->
+  <script src="{{ url_for('static', filename='storage.js') }}?v={{ static_version }}"></script>
 </body>
 </html>
